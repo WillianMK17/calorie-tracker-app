@@ -1,0 +1,30 @@
+# Dependências
+node_modules/
+
+# Produção / Builds
+dist/
+dist-ssr/
+*.local
+.env
+.env.*
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+pubsub-debug.log
+ui-debug.log
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Sistema
+.DS_Store
+Thumbs.db
+.vercel
