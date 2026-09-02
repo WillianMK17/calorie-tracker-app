@@ -849,22 +849,22 @@ export default function CalorieTracker() {
         </div>
       )}
 
-      {/* TOP NAVBAR DESKTOP PREVIEW */}
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+      {/* TOP NAVBAR DESKTOP & MOBILE RESPONSIVE */}
+      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3.5 py-3 sm:px-6 sm:py-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
           {/* Logo & Brand */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setViewMode("landing")}>
-            <img src="/logo.png" alt="augefw Logo" className="w-9 h-9 rounded-xl object-contain shadow-md bg-black/20 p-1" />
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-display font-extrabold text-xl tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
+          <div className="flex items-center gap-2 sm:gap-3 cursor-pointer shrink-0" onClick={() => setViewMode("landing")}>
+            <img src="/logo.png" alt="augefw Logo" className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-contain shadow-md bg-black/20 p-1 shrink-0" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-display font-extrabold text-base sm:text-xl tracking-tight bg-gradient-to-r from-emerald-600 to-teal-500 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent">
                   {APP_NAME}
                 </span>
-                <span className="text-[10px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                   PRO
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 truncate">
                 desenvolvido por <strong className="font-bold text-slate-700 dark:text-slate-300">{COMPANY_NAME}</strong>
               </p>
             </div>
@@ -872,7 +872,7 @@ export default function CalorieTracker() {
 
           {/* Desktop Navigation Links */}
           {viewMode === "landing" && (
-            <nav className="hidden md:flex items-center gap-8 text-xs font-semibold text-slate-600 dark:text-slate-300">
+            <nav className="hidden lg:flex items-center gap-8 text-xs font-semibold text-slate-600 dark:text-slate-300">
               <a href="#recursos" className="hover:text-emerald-500 transition">Recursos</a>
               <a href="#como-funciona" className="hover:text-emerald-500 transition">Como Funciona</a>
               <a href="#inteligencia-ia" className="hover:text-emerald-500 transition">IA Gemini 2.5</a>
@@ -881,53 +881,53 @@ export default function CalorieTracker() {
           )}
 
           {/* User Status / Action Controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {viewMode === "app" ? (
               <button
                 onClick={() => setViewMode("landing")}
-                className="px-3.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                className="px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-[11px] sm:text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
-                ← Ir para o Site
+                ← Site
               </button>
             ) : (
               <button
                 onClick={() => setViewMode("app")}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                className="px-2.5 py-1.5 sm:px-3.5 sm:py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
               >
                 Abrir App
               </button>
             )}
 
             {currentUser ? (
-              <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 max-w-[120px] truncate">
+              <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 sm:px-3 sm:py-1.5 rounded-full">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="text-[11px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 max-w-[70px] sm:max-w-[120px] truncate">
                   {currentUser.isAnonymous ? "Convidado" : currentUser.email?.split("@")[0]}
                 </span>
                 <button
                   onClick={handleLogout}
-                  className="ml-1 p-1 text-slate-400 hover:text-rose-500 transition"
+                  className="ml-0.5 p-0.5 text-slate-400 hover:text-rose-500 transition"
                   title="Sair da conta"
                 >
-                  <LogOut size={14} />
+                  <LogOut size={13} />
                 </button>
               </div>
             ) : (
               <button
                 onClick={() => setShowAuthModal(true)}
-                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow-md hover:from-emerald-500 hover:to-teal-500 transition active:scale-95"
+                className="flex items-center gap-1 sm:gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-[11px] sm:text-xs font-extrabold shadow-md hover:from-emerald-500 hover:to-teal-500 transition active:scale-95"
               >
-                <LogIn size={15} />
-                Entrar no App
+                <LogIn size={14} className="shrink-0" />
+                <span>Entrar</span>
               </button>
             )}
 
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-90"
+              className="p-1.5 sm:p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-90"
               title={theme === "dark" ? "Modo Claro" : "Modo Escuro"}
             >
-              {theme === "dark" ? <Sun size={20} className="text-amber-400" /> : <Moon size={20} className="text-slate-700" />}
+              {theme === "dark" ? <Sun size={18} className="text-amber-400" /> : <Moon size={18} className="text-slate-700" />}
             </button>
           </div>
         </div>
