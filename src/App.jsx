@@ -4,7 +4,7 @@ import {
   Camera, X, Check, Loader2, Dumbbell, Key, Sun, Moon, Sparkles, 
   Utensils, Calendar, User, Info, CheckCircle2, ShieldCheck,
   LogIn, LogOut, UserPlus, Lock, Mail, UserCheck, ArrowRight, Zap, Star, LayoutGrid, Shield,
-  Globe, Play, CheckCircle, ArrowUpRight
+  Globe, Play, CheckCircle, ArrowUpRight, Scan, Barcode, Search, PackageSearch
 } from "lucide-react";
 import { callGemini, hasApiKey, getApiKey, setApiKey } from "./lib/gemini.js";
 import { 
@@ -533,6 +533,146 @@ export default function CalorieTracker() {
     setPhotoResult(null);
     setPhotoPreview(null);
     setError("");
+  }
+
+  // Barcode Scanner & Open Food Facts Integration
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeResult, setBarcodeResult] = useState(null);
+  const [barcodeError, setBarcodeError] = useState("");
+
+  async function searchBarcodeProduct(codeToSearch) {
+    const code = (codeToSearch || barcodeInput).trim().replace(/\D/g, "");
+    if (!code) {
+      setBarcodeError("Digite ou escaneie um número de código de barras válido.");
+      return;
+    }
+    setBarcodeError("");
+    setBarcodeLoading(true);
+    setBarcodeResult(null);
+
+    try {
+      // 1. Busca na base de dados global do Open Food Facts
+      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 1 && data.product) {
+          const p = data.product;
+          const name = p.product_name_pt || p.product_name || "Produto Escaneado";
+          const brand = p.brands ? ` (${p.brands})` : "";
+          const nutriments = p.nutriments || {};
+
+          const calories = Math.round(nutriments["energy-kcal_100g"] || nutriments["energy-kcal_serving"] || nutriments["energy-kcal"] || 0);
+          const protein = Math.round(nutriments.proteins_100g || nutriments.proteins_serving || nutriments.proteins || 0);
+          const carbs = Math.round(nutriments.carbohydrates_100g || nutriments.carbohydrates_serving || nutriments.carbohydrates || 0);
+          const fat = Math.round(nutriments.fat_100g || nutriments.fat_serving || nutriments.fat || 0);
+
+          setBarcodeResult({
+            name: `${name}${brand}`,
+            calories,
+            protein,
+            carbs,
+            fat,
+            image: p.image_front_small_url || p.image_url || null,
+            barcode: code,
+            source: "Open Food Facts",
+          });
+          showToast(`Produto "${name}" encontrado!`);
+          setBarcodeLoading(false);
+          return;
+        }
+      }
+
+      // 2. Fallback caso não esteja cadastrado: IA Gemini
+      const text = await callGemini([
+        { text: `O código de barras ${code} não foi achado no Open Food Facts. Identifique o alimento industrializado correspondente a esse código de barras no Brasil. Responda APENAS com JSON: {"name": "nome do produto", "calories": numero_kcal_100g, "protein": numero_g, "carbs": numero_g, "fat": numero_g}. Se não souber, responda name como "Não encontrado".` }
+      ]);
+      const parsed = parseJsonResponse(text);
+      if (parsed && parsed.name && !parsed.name.toLowerCase().includes("não encontrado")) {
+        setBarcodeResult({
+          name: parsed.name,
+          calories: Number(parsed.calories) || 0,
+          protein: Number(parsed.protein) || 0,
+          carbs: Number(parsed.carbs) || 0,
+          fat: Number(parsed.fat) || 0,
+          barcode: code,
+          source: "Gemini IA Database",
+        });
+        showToast(`Produto "${parsed.name}" identificado via IA!`);
+      } else {
+        setBarcodeError(`Código ${code} não encontrado na base. Tente a Foto IA ou cadastre manualmente.`);
+      }
+    } catch (err) {
+      console.error(err);
+      setBarcodeError("Erro ao consultar código de barras.");
+    } finally {
+      setBarcodeLoading(false);
+    }
+  }
+
+  async function analyzeBarcodePhoto(file) {
+    if (!file) return;
+    setBarcodeError("");
+    setBarcodeLoading(true);
+    setBarcodeResult(null);
+
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type || "image/jpeg";
+
+      const text = await callGemini([
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: `Leia o número do código de barras (EAN-13/EAN-8) estampado nesta foto de embalagem de alimento ou identifique o produto e sua tabela nutricional (calorias, proteína, carboidrato, gordura por 100g). Responda APENAS com JSON: {"barcode": "numero_se_encontrar", "name": "nome do produto", "calories": numero, "protein": numero, "carbs": numero, "fat": numero}.` }
+      ]);
+
+      const parsed = parseJsonResponse(text);
+      if (parsed && parsed.barcode) {
+        setBarcodeInput(parsed.barcode);
+        await searchBarcodeProduct(parsed.barcode);
+      } else if (parsed && parsed.name && !parsed.name.toLowerCase().includes("não identificado")) {
+        setBarcodeResult({
+          name: parsed.name,
+          calories: Number(parsed.calories) || 0,
+          protein: Number(parsed.protein) || 0,
+          carbs: Number(parsed.carbs) || 0,
+          fat: Number(parsed.fat) || 0,
+          source: "Leitura de Embalagem IA",
+        });
+        showToast(`Produto "${parsed.name}" lido da embalagem!`);
+      } else {
+        setBarcodeError("Não foi possível ler o código de barras na foto. Tente aproximar da barra com números legíveis.");
+      }
+    } catch (err) {
+      console.error(err);
+      setBarcodeError("Erro ao processar imagem da embalagem.");
+    } finally {
+      setBarcodeLoading(false);
+    }
+  }
+
+  async function confirmBarcodeResult() {
+    if (!barcodeResult) return;
+    setSaving(true);
+    const entry = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: barcodeResult.name,
+      calories: barcodeResult.calories,
+      protein: barcodeResult.protein,
+      carbs: barcodeResult.carbs,
+      fat: barcodeResult.fat,
+      time: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+      swapTip: getSwapTip(barcodeResult.name),
+    };
+    await persist([...entries, entry]);
+    setBarcodeResult(null);
+    setBarcodeInput("");
+    setSaving(false);
+    showToast(`Produto "${entry.name}" registrado via Código de Barras!`);
+  }
+
+  function discardBarcodeResult() {
+    setBarcodeResult(null);
+    setBarcodeError("");
   }
 
   async function addMeal(items, label) {
@@ -1639,6 +1779,125 @@ export default function CalorieTracker() {
                               {saving ? "Salvando..." : "Confirmar & Adicionar"}
                             </button>
                           </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Barcode Scanner Open Food Facts */}
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
+                    <h3 className="font-display font-bold text-base mb-1 flex items-center gap-2">
+                      <Barcode size={18} className="text-emerald-500" /> Leitor de Código de Barras
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Escaneie ou digite o código de barras de alimentos industrializados para carregar a tabela nutricional do Open Food Facts.
+                    </p>
+
+                    <div className="flex gap-2 mb-3">
+                      <div className="relative flex-1">
+                        <Scan size={16} className="absolute left-3 top-3 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Digite o código (ex: 7891000100103)"
+                          value={barcodeInput}
+                          onChange={(e) => setBarcodeInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") searchBarcodeProduct(); }}
+                          className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs tabular focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <button
+                        onClick={() => searchBarcodeProduct()}
+                        disabled={barcodeLoading}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow-md transition"
+                      >
+                        <Search size={14} />
+                        Buscar
+                      </button>
+                    </div>
+
+                    <input
+                      id="barcode-photo-input"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) analyzeBarcodePhoto(file);
+                        e.target.value = "";
+                      }}
+                    />
+
+                    {!barcodeResult && !barcodeLoading && (
+                      <label
+                        htmlFor="barcode-photo-input"
+                        className="w-full flex items-center justify-center gap-2 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold py-2.5 rounded-xl cursor-pointer transition text-xs"
+                      >
+                        <Camera size={16} />
+                        Fotografar Código na Embalagem
+                      </label>
+                    )}
+
+                    {barcodeLoading && (
+                      <div className="flex items-center justify-center gap-2 py-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        <Loader2 size={16} className="animate-spin text-emerald-500" />
+                        Consultando Open Food Facts & IA...
+                      </div>
+                    )}
+
+                    {barcodeError && (
+                      <p className="text-xs font-semibold text-rose-500 mt-2">{barcodeError}</p>
+                    )}
+
+                    {barcodeResult && (
+                      <div className="mt-3 bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                        <div className="flex items-center gap-3 mb-2">
+                          {barcodeResult.image ? (
+                            <img src={barcodeResult.image} alt={barcodeResult.name} className="w-12 h-12 object-contain bg-white rounded-xl p-1 border" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+                              <PackageSearch size={20} />
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-display font-extrabold text-sm text-emerald-600 dark:text-emerald-400">{barcodeResult.name}</p>
+                            <span className="text-[10px] text-slate-400 font-medium">Fonte: {barcodeResult.source}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2 my-3 text-center bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                          <div>
+                            <p className="tabular font-bold text-xs">{Math.round(barcodeResult.calories)}</p>
+                            <p className="text-[9px] text-slate-400">kcal/100g</p>
+                          </div>
+                          <div>
+                            <p className="tabular font-bold text-xs text-emerald-500">{Math.round(barcodeResult.protein)}g</p>
+                            <p className="text-[9px] text-slate-400">Prot</p>
+                          </div>
+                          <div>
+                            <p className="tabular font-bold text-xs text-amber-500">{Math.round(barcodeResult.carbs)}g</p>
+                            <p className="text-[9px] text-slate-400">Carb</p>
+                          </div>
+                          <div>
+                            <p className="tabular font-bold text-xs text-cyan-500">{Math.round(barcodeResult.fat)}g</p>
+                            <p className="text-[9px] text-slate-400">Gord</p>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={discardBarcodeResult}
+                            className="flex-1 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700"
+                          >
+                            Descartar
+                          </button>
+                          <button
+                            onClick={confirmBarcodeResult}
+                            disabled={saving}
+                            className="flex-1 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md"
+                          >
+                            {saving ? "Salvando..." : "Confirmar & Registrar"}
+                          </button>
                         </div>
                       </div>
                     )}
