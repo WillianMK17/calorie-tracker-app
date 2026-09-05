@@ -4,7 +4,7 @@ import {
   Camera, X, Check, Loader2, Dumbbell, Key, Sun, Moon, Sparkles, 
   Utensils, Calendar, User, Info, CheckCircle2, ShieldCheck,
   LogIn, LogOut, UserPlus, Lock, Mail, UserCheck, ArrowRight, Zap, Star, LayoutGrid, Shield,
-  Globe, Play, CheckCircle, ArrowUpRight, Scan, Barcode, Search, PackageSearch
+  Globe, Play, CheckCircle, ArrowUpRight, Scan, Barcode, Search, PackageSearch, Scale
 } from "lucide-react";
 import { callGemini, hasApiKey, getApiKey, setApiKey } from "./lib/gemini.js";
 import { 
@@ -19,7 +19,9 @@ import {
   getUserFoodLog,
   saveUserFoodLog,
   getUserWorkouts,
-  saveUserWorkouts
+  saveUserWorkouts,
+  getUserWeighIn,
+  saveUserWeighIn
 } from "./lib/firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -821,6 +823,51 @@ export default function CalorieTracker() {
   const extraCarbsFromWorkout = workoutCalories > 0 ? Math.round((workoutCalories * 0.6) / 4) : 0;
   const effectiveGoalCarbs = GOALS.carbs + extraCarbsFromWorkout;
 
+  // Peso corporal diário
+  const [weightInput, setWeightInput] = useState("");
+  const [weightSaving, setWeightSaving] = useState(false);
+  const [weightVersion, setWeightVersion] = useState(0);
+  const weightKey = `weight:${todayKey(date)}`;
+
+  useEffect(() => {
+    (async () => {
+      let w = null;
+      try {
+        if (currentUser) {
+          w = await getUserWeighIn(currentUser.uid, todayKey(date));
+        }
+        if (w == null) {
+          const result = await window.storage.get(weightKey, false);
+          if (result) w = JSON.parse(result.value);
+        }
+      } catch {
+        // sem peso salvo
+      }
+      setWeightInput(w != null ? String(w) : "");
+    })();
+  }, [weightKey, currentUser, date]);
+
+  async function saveTodayWeight() {
+    const w = parseFloat(weightInput);
+    if (!w || w <= 0) {
+      showToast("Digite um peso válido.", "info");
+      return;
+    }
+    setWeightSaving(true);
+    try {
+      if (currentUser) {
+        await saveUserWeighIn(currentUser.uid, todayKey(date), w);
+      }
+      await window.storage.set(weightKey, JSON.stringify(w), false);
+      setWeightVersion((v) => v + 1);
+      showToast("Peso de hoje registrado!");
+    } catch {
+      showToast("Não foi possível salvar o peso.", "info");
+    } finally {
+      setWeightSaving(false);
+    }
+  }
+
   const [weekSummary, setWeekSummary] = useState([]);
   const [weekLoading, setWeekLoading] = useState(true);
 
@@ -842,50 +889,51 @@ export default function CalorieTracker() {
           let hasWorkout = false;
           let wCal = 0;
           try {
+            let foodArr = null;
             if (currentUser) {
               const remoteLog = await getUserFoodLog(currentUser.uid, dk);
-              if (remoteLog) {
-                cal = remoteLog.reduce((a, e) => a + (e.calories || 0), 0);
-                prot = remoteLog.reduce((a, e) => a + (e.protein || 0), 0);
-              }
-            } else {
-              const f = await window.storage.get(`foodlog:${dk}`, false);
-              if (f) {
-                const arr = JSON.parse(f.value);
-                cal = arr.reduce((a, e) => a + (e.calories || 0), 0);
-                prot = arr.reduce((a, e) => a + (e.protein || 0), 0);
-              }
+              foodArr = remoteLog && remoteLog.length > 0 ? remoteLog : null;
             }
+            if (!foodArr) {
+              const f = await window.storage.get(`foodlog:${dk}`, false);
+              foodArr = f ? JSON.parse(f.value) : [];
+            }
+            cal = foodArr.reduce((a, e) => a + (e.calories || 0), 0);
+            prot = foodArr.reduce((a, e) => a + (e.protein || 0), 0);
           } catch {
             // sem registro
           }
           try {
+            let workoutArr = null;
             if (currentUser) {
               const remoteWorkouts = await getUserWorkouts(currentUser.uid, dk);
-              if (remoteWorkouts) {
-                hasWorkout = remoteWorkouts.length > 0;
-                const strength = remoteWorkouts.filter((x) => x.type !== "cardio");
-                const cardio = remoteWorkouts.filter((x) => x.type === "cardio");
-                const sets = strength.reduce((a, x) => a + x.sets, 0);
-                const strengthCal = sets > 0 ? Math.round(5 * (profile?.weight || 70) * ((sets * 2) / 60)) : 0;
-                const cardioCal = cardio.reduce((a, x) => a + (x.calories || 0), 0);
-                wCal = strengthCal + cardioCal;
-              }
-            } else {
-              const w = await window.storage.get(`workout:${dk}`, false);
-              if (w) {
-                const arr = JSON.parse(w.value);
-                hasWorkout = arr.length > 0;
-                const strength = arr.filter((x) => x.type !== "cardio");
-                const cardio = arr.filter((x) => x.type === "cardio");
-                const sets = strength.reduce((a, x) => a + x.sets, 0);
-                const strengthCal = sets > 0 ? Math.round(5 * (profile?.weight || 70) * ((sets * 2) / 60)) : 0;
-                const cardioCal = cardio.reduce((a, x) => a + (x.calories || 0), 0);
-                wCal = strengthCal + cardioCal;
-              }
+              workoutArr = remoteWorkouts && remoteWorkouts.length > 0 ? remoteWorkouts : null;
             }
+            if (!workoutArr) {
+              const w = await window.storage.get(`workout:${dk}`, false);
+              workoutArr = w ? JSON.parse(w.value) : [];
+            }
+            hasWorkout = workoutArr.length > 0;
+            const strength = workoutArr.filter((x) => x.type !== "cardio");
+            const cardio = workoutArr.filter((x) => x.type === "cardio");
+            const sets = strength.reduce((a, x) => a + x.sets, 0);
+            const strengthCal = sets > 0 ? Math.round(5 * (profile?.weight || 70) * ((sets * 2) / 60)) : 0;
+            const cardioCal = cardio.reduce((a, x) => a + (x.calories || 0), 0);
+            wCal = strengthCal + cardioCal;
           } catch {
             // sem treino
+          }
+          let weight = null;
+          try {
+            if (currentUser) {
+              weight = await getUserWeighIn(currentUser.uid, dk);
+            }
+            if (weight == null) {
+              const result = await window.storage.get(`weight:${dk}`, false);
+              weight = result ? JSON.parse(result.value) : null;
+            }
+          } catch {
+            // sem peso
           }
           return {
             dateKey: dk,
@@ -895,6 +943,7 @@ export default function CalorieTracker() {
             protein: Math.round(prot),
             hasWorkout,
             workoutCalories: wCal,
+            weight,
           };
         })
       );
@@ -906,7 +955,7 @@ export default function CalorieTracker() {
     return () => {
       cancelled = true;
     };
-  }, [entries, workouts, profile, currentUser]);
+  }, [entries, workouts, profile, currentUser, weightVersion]);
 
   const budgetCalories = Math.max(0, remaining);
   const budgetProtein = Math.max(0, GOALS.protein - totals.protein);
@@ -2596,6 +2645,63 @@ export default function CalorieTracker() {
               {/* TAB 4: PROGRESS & RESUMO DA SEMANA */}
               {activeTab === "progress" && (
                 <div className="space-y-6">
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
+                    <h3 className="font-display font-bold text-base mb-1 flex items-center gap-2">
+                      <Scale size={18} className="text-cyan-500" /> Peso Corporal
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Registre seu peso diariamente para acompanhar sua evolução.
+                    </p>
+                    <div className="flex gap-2 mb-4">
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="Peso de hoje (kg)"
+                        value={weightInput}
+                        onChange={(e) => setWeightInput(e.target.value)}
+                        className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm tabular focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      />
+                      <button
+                        onClick={saveTodayWeight}
+                        disabled={weightSaving}
+                        className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs shadow-md transition shrink-0"
+                      >
+                        {weightSaving ? "Salvando..." : "Salvar"}
+                      </button>
+                    </div>
+
+                    {!weekLoading && (() => {
+                      const weights = weekSummary.map((d) => d.weight).filter((w) => w != null);
+                      const min = weights.length ? Math.min(...weights) : 0;
+                      const max = weights.length ? Math.max(...weights) : 0;
+                      const range = max - min || 1;
+                      return (
+                        <div className="space-y-2">
+                          {weekSummary.map((d) => {
+                            const pct = d.weight != null ? 15 + ((d.weight - min) / range) * 85 : 0;
+                            return (
+                              <div key={d.dateKey} className="flex items-center gap-3">
+                                <span className={`text-xs font-bold w-10 capitalize ${d.isToday ? "text-emerald-500" : "text-slate-500"}`}>
+                                  {d.label}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                    {d.weight != null && (
+                                      <div className="h-full rounded-full bg-cyan-500" style={{ width: `${pct}%` }} />
+                                    )}
+                                  </div>
+                                </div>
+                                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 tabular w-16 text-right">
+                                  {d.weight != null ? `${d.weight} kg` : "—"}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
                     <h3 className="font-display font-bold text-base mb-1">Resumo dos Últimos 7 Dias</h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">

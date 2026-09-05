@@ -121,3 +121,26 @@ export async function saveUserWorkouts(uid, dateKey, items) {
     console.error("Erro ao salvar treinos no Firestore:", err);
   }
 }
+
+export async function getUserWeighIn(uid, dateKey) {
+  try {
+    const docRef = doc(db, "users", uid, "weighins", dateKey);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data().weight ?? null;
+    }
+    return null;
+  } catch (err) {
+    console.error("Erro ao buscar peso no Firestore:", err);
+    return null;
+  }
+}
+
+export async function saveUserWeighIn(uid, dateKey, weight) {
+  try {
+    const docRef = doc(db, "users", uid, "weighins", dateKey);
+    await setDoc(docRef, { weight, updatedAt: new Date().toISOString() }, { merge: true });
+  } catch (err) {
+    console.error("Erro ao salvar peso no Firestore:", err);
+  }
+}
