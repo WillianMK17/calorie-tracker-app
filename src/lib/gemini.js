@@ -2,7 +2,10 @@ const KEY_STORAGE = "calorie-tracker:gemini-api-key";
 const MODEL = "gemini-2.5-flash";
 
 export function getApiKey() {
-  return localStorage.getItem(KEY_STORAGE) || import.meta.env.VITE_GEMINI_API_KEY || "";
+  // Só localStorage: nunca ler de import.meta.env aqui. Qualquer var VITE_*
+  // referenciada no código do cliente é embutida em texto puro no bundle
+  // pelo Vite, expondo a chave para qualquer visitante do site.
+  return localStorage.getItem(KEY_STORAGE) || "";
 }
 
 export function setApiKey(key) {
