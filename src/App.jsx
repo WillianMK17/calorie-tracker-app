@@ -391,6 +391,92 @@ export default function CalorieTracker() {
     showToast("Exercício removido", "info");
   }
 
+  // Leitura de ficha de treino por foto (IA)
+  const [workoutPhotoLoading, setWorkoutPhotoLoading] = useState(false);
+  const [workoutPhotoResult, setWorkoutPhotoResult] = useState(null);
+  const [workoutPhotoError, setWorkoutPhotoError] = useState("");
+
+  function parseWorkoutListResponse(text) {
+    if (!text) return [];
+    try {
+      const arrayMatch = text.match(/\[[\s\S]*\]/);
+      const parsed = JSON.parse(arrayMatch ? arrayMatch[0] : text);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async function analyzeWorkoutPhoto(file) {
+    if (!file) return;
+    setWorkoutPhotoError("");
+    setWorkoutPhotoLoading(true);
+    setWorkoutPhotoResult(null);
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type || "image/jpeg";
+
+      const text = await callGemini([
+        { inline_data: { mime_type: mimeType, data: base64 } },
+        { text: `Leia esta foto de uma ficha de treino de academia e liste todos os exercícios de musculação nela (ignore itens só de cardio, como esteira ou bike, que não têm séries/repetições). Use as séries e repetições impressas na ficha para cada exercício. Responda APENAS com um array JSON, sem texto ao redor, no formato: [{"name": "nome do exercício", "sets": numero, "reps": numero}]. Se não conseguir ler nenhum exercício, responda [].` },
+      ]);
+
+      const list = parseWorkoutListResponse(text);
+      if (list.length === 0) {
+        setWorkoutPhotoError("Não foi possível ler exercícios nessa foto. Tente uma foto mais nítida ou cadastre manualmente.");
+      } else {
+        setWorkoutPhotoResult(
+          list.map((item) => ({
+            name: item?.name ? String(item.name) : "Exercício",
+            sets: item?.sets ? String(item.sets) : "",
+            reps: item?.reps ? String(item.reps) : "",
+            weight: "",
+          }))
+        );
+        showToast(`${list.length} exercício(s) lido(s) da ficha!`);
+      }
+    } catch (err) {
+      console.error(err);
+      setWorkoutPhotoError("Erro ao processar a foto da ficha de treino.");
+    } finally {
+      setWorkoutPhotoLoading(false);
+    }
+  }
+
+  function updateWorkoutPhotoItem(index, field, value) {
+    setWorkoutPhotoResult((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+  }
+
+  function removeWorkoutPhotoItem(index) {
+    setWorkoutPhotoResult((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length > 0 ? next : null;
+    });
+  }
+
+  async function confirmWorkoutPhotoResult() {
+    if (!workoutPhotoResult || workoutPhotoResult.length === 0) return;
+    const items = workoutPhotoResult
+      .map((item) => ({
+        name: item.name.trim(),
+        sets: parseInt(item.sets, 10) || 0,
+        reps: parseInt(item.reps, 10) || 0,
+        weight: parseFloat(item.weight) || 0,
+      }))
+      .filter((item) => item.name && item.sets > 0);
+    if (items.length === 0) {
+      setWorkoutPhotoError("Preencha ao menos o nome e as séries de um exercício.");
+      return;
+    }
+    await addWorkoutPreset(items, "Foto do Treino");
+    setWorkoutPhotoResult(null);
+  }
+
+  function discardWorkoutPhotoResult() {
+    setWorkoutPhotoResult(null);
+    setWorkoutPhotoError("");
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -2184,6 +2270,118 @@ export default function CalorieTracker() {
                       </div>
                       <Plus size={18} className="text-emerald-500 shrink-0" />
                     </button>
+
+                    {/* Leitura de Ficha de Treino por Foto (IA) */}
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 mb-4">
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                        <Camera size={14} className="text-emerald-500" /> Ler Ficha de Treino por Foto (IA)
+                      </p>
+
+                      <input
+                        id="workout-photo-input"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) analyzeWorkoutPhoto(file);
+                          e.target.value = "";
+                        }}
+                      />
+
+                      {!workoutPhotoResult && !workoutPhotoLoading && (
+                        <label
+                          htmlFor="workout-photo-input"
+                          className="w-full flex items-center justify-center gap-2 border border-slate-300 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold py-2.5 rounded-xl cursor-pointer transition text-xs"
+                        >
+                          <Camera size={16} />
+                          Fotografar Ficha da Academia
+                        </label>
+                      )}
+
+                      {workoutPhotoLoading && (
+                        <div className="flex items-center justify-center gap-2 py-4 bg-white dark:bg-slate-800/60 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          <Loader2 size={16} className="animate-spin text-emerald-500" />
+                          Lendo exercícios da ficha...
+                        </div>
+                      )}
+
+                      {workoutPhotoError && (
+                        <p className="text-xs font-semibold text-rose-500 mt-2">{workoutPhotoError}</p>
+                      )}
+
+                      {workoutPhotoResult && (
+                        <div className="mt-1">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                            Confira, ajuste o peso (não vem na ficha) e apague o que não quiser antes de adicionar.
+                          </p>
+                          <div className="space-y-2 mb-3">
+                            {workoutPhotoResult.map((item, index) => (
+                              <div
+                                key={index}
+                                className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700"
+                              >
+                                <div className="flex items-center gap-2 mb-2">
+                                  <input
+                                    type="text"
+                                    placeholder="Exercício"
+                                    value={item.name}
+                                    onChange={(e) => updateWorkoutPhotoItem(index, "name", e.target.value)}
+                                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                  <button
+                                    onClick={() => removeWorkoutPhotoItem(index)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 shrink-0"
+                                    title="Excluir exercício"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <input
+                                    type="number"
+                                    placeholder="Séries"
+                                    value={item.sets}
+                                    onChange={(e) => updateWorkoutPhotoItem(index, "sets", e.target.value)}
+                                    className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs tabular focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                  <input
+                                    type="number"
+                                    placeholder="Reps"
+                                    value={item.reps}
+                                    onChange={(e) => updateWorkoutPhotoItem(index, "reps", e.target.value)}
+                                    className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs tabular focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                  <input
+                                    type="number"
+                                    placeholder="Carga (kg)"
+                                    value={item.weight}
+                                    onChange={(e) => updateWorkoutPhotoItem(index, "weight", e.target.value)}
+                                    className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs tabular focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={discardWorkoutPhotoResult}
+                              className="flex-1 py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700"
+                            >
+                              Descartar Tudo
+                            </button>
+                            <button
+                              onClick={confirmWorkoutPhotoResult}
+                              disabled={workoutSaving}
+                              className="flex-1 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md"
+                            >
+                              {workoutSaving ? "Salvando..." : `Adicionar ${workoutPhotoResult.length} ao Treino`}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Musculação Form */}
                     <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 mb-4">
