@@ -4,7 +4,7 @@ import {
   Camera, X, Check, Loader2, Dumbbell, Key, Sun, Moon, Sparkles, 
   Utensils, Calendar, User, Info, CheckCircle2, ShieldCheck,
   LogIn, LogOut, UserPlus, Lock, Mail, UserCheck, ArrowRight, Zap, Star, LayoutGrid, Shield,
-  Globe, Play, CheckCircle, ArrowUpRight, Scan, Barcode, Search, PackageSearch, Scale
+  Globe, Play, CheckCircle, ArrowUpRight, Scan, Barcode, Search, PackageSearch, Scale, Ruler
 } from "lucide-react";
 import { callGemini, hasApiKey, getApiKey, setApiKey } from "./lib/gemini.js";
 import { 
@@ -21,7 +21,9 @@ import {
   getUserWorkouts,
   saveUserWorkouts,
   getUserWeighIn,
-  saveUserWeighIn
+  saveUserWeighIn,
+  getUserMeasurements,
+  saveUserMeasurements
 } from "./lib/firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -866,6 +868,85 @@ export default function CalorieTracker() {
     } finally {
       setWeightSaving(false);
     }
+  }
+
+  // Medidas corporais (histórico livre, não preso a um dia fixo)
+  const MEASUREMENT_FIELDS = ["waist", "hips", "chest", "arm", "thigh"];
+  const MEASUREMENT_LABELS = { waist: "Cintura", hips: "Quadril", chest: "Peito", arm: "Braço", thigh: "Coxa" };
+
+  const [measurements, setMeasurements] = useState([]);
+  const [measurementsForm, setMeasurementsForm] = useState({ waist: "", hips: "", chest: "", arm: "", thigh: "" });
+  const [measurementsSaving, setMeasurementsSaving] = useState(false);
+
+  const loadMeasurements = useCallback(async () => {
+    try {
+      let list = null;
+      if (currentUser) {
+        const remote = await getUserMeasurements(currentUser.uid);
+        list = remote && remote.length > 0 ? remote : null;
+      }
+      if (!list) {
+        const result = await window.storage.get("measurements-history", false);
+        list = result ? JSON.parse(result.value) : [];
+      }
+      setMeasurements([...list].sort((a, b) => (a.date < b.date ? 1 : -1)));
+    } catch {
+      setMeasurements([]);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    loadMeasurements();
+  }, [loadMeasurements]);
+
+  async function persistMeasurements(next) {
+    setMeasurements(next);
+    try {
+      if (currentUser) {
+        await saveUserMeasurements(currentUser.uid, next);
+      }
+      await window.storage.set("measurements-history", JSON.stringify(next), false);
+    } catch {
+      showToast("Não foi possível salvar as medidas.", "info");
+    }
+  }
+
+  async function saveMeasurements() {
+    const values = {};
+    let hasAny = false;
+    for (const field of MEASUREMENT_FIELDS) {
+      const v = parseFloat(measurementsForm[field]);
+      if (v > 0) {
+        values[field] = v;
+        hasAny = true;
+      }
+    }
+    if (!hasAny) {
+      showToast("Preencha ao menos uma medida.", "info");
+      return;
+    }
+    setMeasurementsSaving(true);
+    const dk = todayKey(date);
+    const existingIndex = measurements.findIndex((m) => m.date === dk);
+    let next;
+    if (existingIndex >= 0) {
+      next = measurements.map((m, i) => (i === existingIndex ? { ...m, ...values } : m));
+    } else {
+      next = [
+        ...measurements,
+        { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date: dk, ...values },
+      ];
+    }
+    next.sort((a, b) => (a.date < b.date ? 1 : -1));
+    await persistMeasurements(next);
+    setMeasurementsForm({ waist: "", hips: "", chest: "", arm: "", thigh: "" });
+    setMeasurementsSaving(false);
+    showToast("Medidas registradas!");
+  }
+
+  async function removeMeasurement(id) {
+    await persistMeasurements(measurements.filter((m) => m.id !== id));
+    showToast("Registro de medidas removido", "info");
   }
 
   const [weekSummary, setWeekSummary] = useState([]);
@@ -2700,6 +2781,87 @@ export default function CalorieTracker() {
                         </div>
                       );
                     })()}
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
+                    <h3 className="font-display font-bold text-base mb-1 flex items-center gap-2">
+                      <Ruler size={18} className="text-amber-500" /> Medidas Corporais
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Registre de vez em quando (ex: 1x por mês) para ver a evolução da sua composição corporal.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {MEASUREMENT_FIELDS.map((field) => (
+                        <input
+                          key={field}
+                          type="number"
+                          step="0.1"
+                          placeholder={`${MEASUREMENT_LABELS[field]} (cm)`}
+                          value={measurementsForm[field]}
+                          onChange={(e) => setMeasurementsForm({ ...measurementsForm, [field]: e.target.value })}
+                          className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs tabular focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={saveMeasurements}
+                      disabled={measurementsSaving}
+                      className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition mb-3"
+                    >
+                      {measurementsSaving ? "Salvando..." : "Salvar Medidas"}
+                    </button>
+
+                    {measurements.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-2">Nenhuma medida registrada ainda.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {measurements.slice(0, 5).map((m, i) => {
+                          const prev = measurements[i + 1];
+                          return (
+                            <div
+                              key={m.id}
+                              className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700"
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                                  {new Date(m.date + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
+                                </span>
+                                <button
+                                  onClick={() => removeMeasurement(m.id)}
+                                  className="p-1 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-5 gap-1.5 text-center">
+                                {MEASUREMENT_FIELDS.map((field) => {
+                                  const value = m[field];
+                                  const delta =
+                                    prev && prev[field] != null && value != null
+                                      ? +(value - prev[field]).toFixed(1)
+                                      : null;
+                                  return (
+                                    <div key={field}>
+                                      <p className="text-[9px] text-slate-400">{MEASUREMENT_LABELS[field]}</p>
+                                      <p className="text-xs font-bold tabular">
+                                        {value != null ? `${value}` : "—"}
+                                      </p>
+                                      {delta != null && delta !== 0 && (
+                                        <p className="text-[9px] font-semibold text-slate-400">
+                                          {delta > 0 ? "+" : ""}
+                                          {delta}
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
