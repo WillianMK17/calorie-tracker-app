@@ -481,6 +481,86 @@ export default function CalorieTracker() {
     setWorkoutPhotoError("");
   }
 
+  // Treino Inteligente (IA): dicas por objetivo + análise do treino do dia
+  const TRAINING_GOALS = [
+    { id: "emagrecer", label: "Emagrecer" },
+    { id: "perder_barriga", label: "Perder Barriga" },
+    { id: "ficar_forte", label: "Ficar Forte" },
+    { id: "definir", label: "Definir o Corpo" },
+    { id: "ganhar_massa", label: "Ganhar Peso/Massa" },
+  ];
+
+  const [trainingGoal, setTrainingGoal] = useState("emagrecer");
+
+  const [goalTipsLoading, setGoalTipsLoading] = useState(false);
+  const [goalTipsResult, setGoalTipsResult] = useState(null);
+  const [goalTipsError, setGoalTipsError] = useState("");
+
+  async function generateGoalTips() {
+    setGoalTipsError("");
+    setGoalTipsLoading(true);
+    setGoalTipsResult(null);
+    const goalLabel = TRAINING_GOALS.find((g) => g.id === trainingGoal)?.label || trainingGoal;
+    try {
+      const text = await callGemini([
+        {
+          text: `Você é um personal trainer. Objetivo do usuário: ${goalLabel}. Dados: peso ${profile?.weight || "?"}kg, altura ${profile?.height || "?"}cm, idade ${profile?.age || "?"} anos, sexo ${profile?.sex === "f" ? "feminino" : "masculino"}, nível de atividade: ${profile?.activity || "moderado"}. Dê de 5 a 6 dicas práticas e específicas de treino pra esse objetivo (frequência semanal, faixa de repetições/séries, tipo de exercício mais indicado, papel do descanso, papel da dieta). Responda APENAS com um array JSON de strings, sem texto ao redor: ["dica 1", "dica 2", ...]`,
+        },
+      ]);
+      const tips = parseWorkoutListResponse(text);
+      if (tips.length === 0) {
+        setGoalTipsError("Não foi possível gerar dicas agora. Tente novamente.");
+      } else {
+        setGoalTipsResult(tips.map((t) => String(t)));
+      }
+    } catch (err) {
+      console.error(err);
+      setGoalTipsError("Erro ao gerar dicas com a IA. Tente novamente em instantes.");
+    } finally {
+      setGoalTipsLoading(false);
+    }
+  }
+
+  const [workoutAnalysisLoading, setWorkoutAnalysisLoading] = useState(false);
+  const [workoutAnalysisResult, setWorkoutAnalysisResult] = useState(null);
+  const [workoutAnalysisError, setWorkoutAnalysisError] = useState("");
+
+  async function analyzeTodayWorkout() {
+    if (workouts.length === 0) return;
+    setWorkoutAnalysisError("");
+    setWorkoutAnalysisLoading(true);
+    setWorkoutAnalysisResult(null);
+    const goalLabel = TRAINING_GOALS.find((g) => g.id === trainingGoal)?.label || trainingGoal;
+    const workoutSummary = workouts
+      .map((w) =>
+        w.type === "cardio"
+          ? `${w.name}: cardio ${w.minutes ? w.minutes + "min, " : ""}${w.calories || 0}kcal`
+          : `${w.name}: ${w.sets}x${w.reps || "?"}${w.weight > 0 ? ` (${w.weight}kg)` : ""}`
+      )
+      .join("; ");
+    try {
+      const text = await callGemini([
+        {
+          text: `Você é um personal trainer. Objetivo do usuário: ${goalLabel}. Peso: ${profile?.weight || "?"}kg, nível de atividade: ${profile?.activity || "moderado"}. Treino registrado hoje: ${workoutSummary}. Avalie esse treino especificamente (o que está bom, o que está faltando pro objetivo) e dê um prognóstico curto do que tende a acontecer se a pessoa mantiver esse padrão de treino ao longo do tempo. Responda APENAS com JSON: {"avaliacao": "texto curto", "prognostico": "texto curto"}.`,
+        },
+      ]);
+      const parsed = parseJsonResponse(text);
+      if (!parsed || !parsed.avaliacao) {
+        setWorkoutAnalysisError("Não foi possível analisar o treino agora. Tente novamente.");
+      } else {
+        setWorkoutAnalysisResult({
+          avaliacao: String(parsed.avaliacao),
+          prognostico: String(parsed.prognostico || ""),
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      setWorkoutAnalysisError("Erro ao analisar com a IA. Tente novamente em instantes.");
+    } finally {
+      setWorkoutAnalysisLoading(false);
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -2591,6 +2671,120 @@ export default function CalorieTracker() {
                       >
                         Adicionar Cardio
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
+                    <h3 className="font-display font-bold text-base mb-1 flex items-center gap-2">
+                      <Sparkles size={18} className="text-violet-500" /> Treino Inteligente (IA)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Escolha seu objetivo pra receber dicas e uma análise do seu treino de hoje.
+                    </p>
+
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {TRAINING_GOALS.map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={() => setTrainingGoal(g.id)}
+                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition ${
+                            trainingGoal === g.id
+                              ? "bg-violet-600 border-violet-600 text-white"
+                              : "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                          }`}
+                        >
+                          {g.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 mb-3">
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Dicas para o seu Objetivo</p>
+                      {!goalTipsResult && !goalTipsLoading && (
+                        <button
+                          onClick={generateGoalTips}
+                          className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition"
+                        >
+                          Gerar Dicas
+                        </button>
+                      )}
+                      {goalTipsLoading && (
+                        <div className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          <Loader2 size={16} className="animate-spin text-violet-500" />
+                          Gerando dicas...
+                        </div>
+                      )}
+                      {goalTipsError && <p className="text-xs font-semibold text-rose-500 mt-1">{goalTipsError}</p>}
+                      {goalTipsResult && (
+                        <div>
+                          <ul className="space-y-1.5 mb-3">
+                            {goalTipsResult.map((tip, i) => (
+                              <li key={i} className="text-xs text-slate-700 dark:text-slate-300 flex gap-1.5">
+                                <span className="text-violet-500 font-bold">•</span> {tip}
+                              </li>
+                            ))}
+                          </ul>
+                          <button
+                            onClick={generateGoalTips}
+                            className="w-full py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            Gerar Novas Dicas
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">Análise do Treino de Hoje</p>
+                      {workouts.length === 0 ? (
+                        <p className="text-xs text-slate-400">
+                          Registre pelo menos um exercício ou cardio hoje pra liberar a análise.
+                        </p>
+                      ) : (
+                        <>
+                          {!workoutAnalysisResult && !workoutAnalysisLoading && (
+                            <button
+                              onClick={analyzeTodayWorkout}
+                              className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition"
+                            >
+                              Analisar Meu Treino de Hoje
+                            </button>
+                          )}
+                          {workoutAnalysisLoading && (
+                            <div className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              <Loader2 size={16} className="animate-spin text-violet-500" />
+                              Analisando seu treino...
+                            </div>
+                          )}
+                          {workoutAnalysisError && (
+                            <p className="text-xs font-semibold text-rose-500 mt-1">{workoutAnalysisError}</p>
+                          )}
+                          {workoutAnalysisResult && (
+                            <div>
+                              <div className="mb-2.5">
+                                <p className="text-[10px] font-bold text-violet-500 uppercase mb-1">Avaliação</p>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                                  {workoutAnalysisResult.avaliacao}
+                                </p>
+                              </div>
+                              {workoutAnalysisResult.prognostico && (
+                                <div className="mb-3">
+                                  <p className="text-[10px] font-bold text-amber-500 uppercase mb-1">Prognóstico</p>
+                                  <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                                    {workoutAnalysisResult.prognostico}
+                                  </p>
+                                </div>
+                              )}
+                              <button
+                                onClick={analyzeTodayWorkout}
+                                className="w-full py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800"
+                              >
+                                Analisar Novamente
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
