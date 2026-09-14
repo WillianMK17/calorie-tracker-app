@@ -1,6 +1,11 @@
 const KEY_STORAGE = "calorie-tracker:gemini-api-key";
 const MODEL = "gemini-2.5-flash";
 
+// O gemini-2.5-flash usa "thinking" por padrão, o que levava análises mais
+// longas a demorar ~36s. Desligando, a mesma resposta sai em ~8s, latência
+// aceitável pra alguém esperando na tela.
+const GENERATION_CONFIG = { thinkingConfig: { thinkingBudget: 0 } };
+
 export function getApiKey() {
   // Só localStorage: nunca ler de import.meta.env aqui. Qualquer var VITE_*
   // referenciada no código do cliente é embutida em texto puro no bundle
@@ -49,7 +54,10 @@ export async function callGemini(parts) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts }] }),
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: GENERATION_CONFIG,
+      }),
     }
   );
 

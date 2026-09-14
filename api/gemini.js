@@ -33,7 +33,12 @@ export default async function handler(req, res) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ role: "user", parts }] }),
+        body: JSON.stringify({
+          contents: [{ role: "user", parts }],
+          // Desliga o "thinking" do gemini-2.5-flash: analises longas caem
+          // de ~36s para ~8s sem perda relevante de qualidade.
+          generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
+        }),
       }
     );
 

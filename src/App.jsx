@@ -627,6 +627,94 @@ export default function CalorieTracker() {
     showToast("Item removido do diário", "info");
   }
 
+  // Preenche os macros do alimento digitado usando a IA
+  const [fillingMacros, setFillingMacros] = useState(false);
+
+  async function fillFoodMacrosWithAI() {
+    const desc = form.name.trim();
+    if (!desc) {
+      setError("Digite o que você comeu (ex: 1 banana prata) antes de usar a IA.");
+      return;
+    }
+    setError("");
+    setFillingMacros(true);
+    try {
+      const text = await callGemini([
+        {
+          text: `Estime os valores nutricionais de: "${desc}". Se a quantidade não estiver clara, assuma uma porção comum consumida por uma pessoa e deixe isso explícito no nome. Considere alimentos e preparos comuns do Brasil. Responda APENAS com JSON: {"name": "nome curto do alimento incluindo a porção", "calories": numero, "protein": numero, "carbs": numero, "fat": numero}. Calorias em kcal e macros em gramas, apenas números.`,
+        },
+      ]);
+      const parsed = parseJsonResponse(text);
+      if (!parsed || parsed.calories == null) {
+        setError("Não consegui estimar esse alimento. Tente descrever melhor (ex: 1 banana média).");
+      } else {
+        const oneDecimal = (v) => String(Math.round((Number(v) || 0) * 10) / 10);
+        setForm({
+          name: parsed.name ? String(parsed.name) : desc,
+          calories: String(Math.round(Number(parsed.calories) || 0)),
+          protein: oneDecimal(parsed.protein),
+          carbs: oneDecimal(parsed.carbs),
+          fat: oneDecimal(parsed.fat),
+        });
+        showToast("Valores estimados pela IA — confira antes de registrar.");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Erro ao consultar a IA. Tente novamente em instantes.");
+    } finally {
+      setFillingMacros(false);
+    }
+  }
+
+  // Nutrição Inteligente (IA): análise da alimentação do dia
+  const [nutritionAnalysisLoading, setNutritionAnalysisLoading] = useState(false);
+  const [nutritionAnalysisResult, setNutritionAnalysisResult] = useState(null);
+  const [nutritionAnalysisError, setNutritionAnalysisError] = useState("");
+
+  async function analyzeTodayNutrition() {
+    if (entries.length === 0) return;
+    setNutritionAnalysisError("");
+    setNutritionAnalysisLoading(true);
+    setNutritionAnalysisResult(null);
+    const goalLabel = TRAINING_GOALS.find((g) => g.id === trainingGoal)?.label || trainingGoal;
+    const foodSummary = entries
+      .map(
+        (e) =>
+          `${e.time || ""} ${e.name} (${Math.round(e.calories)}kcal, P${Math.round(e.protein || 0)}g C${Math.round(
+            e.carbs || 0
+          )}g G${Math.round(e.fat || 0)}g)`
+      )
+      .join("; ");
+    try {
+      const text = await callGemini([
+        {
+          text: `Você é um nutricionista esportivo. Objetivo do usuário: ${goalLabel}. Perfil: ${profile?.weight || "?"}kg, ${profile?.age || "?"} anos, sexo ${profile?.sex === "f" ? "feminino" : "masculino"}, nível de atividade ${profile?.activity || "moderado"}. Meta do dia: ${Math.round(effectiveGoalCalories)} kcal e ${GOALS.protein}g de proteína. Já consumiu hoje: ${Math.round(totals.calories)} kcal, P${Math.round(totals.protein)}g C${Math.round(totals.carbs)}g G${Math.round(totals.fat)}g. Alimentos de hoje: ${foodSummary}. Ainda restam: ${Math.round(budgetCalories)} kcal, ${Math.round(budgetProtein)}g proteína, ${Math.round(budgetCarbs)}g carboidrato, ${Math.round(budgetFat)}g gordura.
+
+Analise com foco em composição corporal: (a) resposta glicêmica/insulínica do dia — carga glicêmica, fibra, tipo de carboidrato; (b) quantidade e distribuição de proteína entre as refeições, que é o que sustenta a síntese proteica muscular. Depois sugira alimentos e trocas concretas para o RESTANTE do dia, que caibam nos macros que sobraram e favoreçam o objetivo.
+
+Seja honesto e não exagere efeitos hormonais: se o objetivo depende de déficit calórico e o consumo não bate, aponte; se sono e estresse forem mais determinantes que a comida para algum ponto, diga isso.
+
+Responda APENAS com JSON: {"avaliacao": "texto curto", "sugestoes": ["sugestão 1", "sugestão 2", "sugestão 3"], "observacao": "um ponto de contexto honesto e curto"}`,
+        },
+      ]);
+      const parsed = parseJsonResponse(text);
+      if (!parsed || !parsed.avaliacao) {
+        setNutritionAnalysisError("Não foi possível analisar sua alimentação agora. Tente novamente.");
+      } else {
+        setNutritionAnalysisResult({
+          avaliacao: String(parsed.avaliacao),
+          sugestoes: Array.isArray(parsed.sugestoes) ? parsed.sugestoes.map((s) => String(s)) : [],
+          observacao: parsed.observacao ? String(parsed.observacao) : "",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      setNutritionAnalysisError("Erro ao analisar com a IA. Tente novamente em instantes.");
+    } finally {
+      setNutritionAnalysisLoading(false);
+    }
+  }
+
   function parseJsonResponse(text) {
     if (!text) return null;
     try {
@@ -2272,13 +2360,32 @@ export default function CalorieTracker() {
                     <h3 className="font-display font-bold text-base mb-3 flex items-center gap-2">
                       <Plus size={18} className="text-emerald-500" /> Adicionar Alimento Manual
                     </h3>
-                    <input
-                      type="text"
-                      placeholder="Nome do alimento ou prato"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      className="w-full mb-3 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        placeholder="O que você comeu (ex: 1 banana prata)"
+                        value={form.name}
+                        onChange={(e) => setForm({ ...form, name: e.target.value })}
+                        className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={fillFoodMacrosWithAI}
+                        disabled={fillingMacros}
+                        title="Preencher calorias e macros com IA"
+                        className="px-3.5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-xl text-xs shadow-md transition flex items-center gap-1.5 shrink-0 disabled:opacity-60"
+                      >
+                        {fillingMacros ? (
+                          <Loader2 size={15} className="animate-spin" />
+                        ) : (
+                          <Sparkles size={15} />
+                        )}
+                        IA
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-3">
+                      Não sabe as calorias? Escreva o que comeu e toque em IA que ela estima pra você.
+                    </p>
                     <div className="grid grid-cols-4 gap-2 mb-3">
                       <input
                         type="number"
@@ -2408,6 +2515,100 @@ export default function CalorieTracker() {
                           ))}
                       </div>
                     )}
+                  </div>
+
+                  {/* Nutrição Inteligente (IA) */}
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-md border border-slate-200/80 dark:border-slate-800">
+                    <h3 className="font-display font-bold text-base mb-1 flex items-center gap-2">
+                      <Sparkles size={18} className="text-violet-500" /> Nutrição Inteligente (IA)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Analisa o que você comeu hoje e sugere alimentos pro resto do dia, de acordo com o seu objetivo.
+                    </p>
+
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {TRAINING_GOALS.map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={() => setTrainingGoal(g.id)}
+                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition ${
+                            trainingGoal === g.id
+                              ? "bg-violet-600 border-violet-600 text-white"
+                              : "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                          }`}
+                        >
+                          {g.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {entries.length === 0 ? (
+                      <p className="text-xs text-slate-400">
+                        Registre pelo menos uma refeição hoje pra liberar a análise.
+                      </p>
+                    ) : (
+                      <>
+                        {!nutritionAnalysisResult && !nutritionAnalysisLoading && (
+                          <button
+                            onClick={analyzeTodayNutrition}
+                            className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition"
+                          >
+                            Analisar Minha Alimentação de Hoje
+                          </button>
+                        )}
+                        {nutritionAnalysisLoading && (
+                          <div className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            <Loader2 size={16} className="animate-spin text-violet-500" />
+                            Analisando sua alimentação...
+                          </div>
+                        )}
+                        {nutritionAnalysisError && (
+                          <p className="text-xs font-semibold text-rose-500 mt-1">{nutritionAnalysisError}</p>
+                        )}
+                        {nutritionAnalysisResult && (
+                          <div>
+                            <div className="mb-3">
+                              <p className="text-[10px] font-bold text-violet-500 uppercase mb-1">Avaliação</p>
+                              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                                {nutritionAnalysisResult.avaliacao}
+                              </p>
+                            </div>
+                            {nutritionAnalysisResult.sugestoes.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-[10px] font-bold text-emerald-500 uppercase mb-1">
+                                  Sugestões pro resto do dia
+                                </p>
+                                <ul className="space-y-1.5">
+                                  {nutritionAnalysisResult.sugestoes.map((s, i) => (
+                                    <li key={i} className="text-xs text-slate-700 dark:text-slate-300 flex gap-1.5">
+                                      <span className="text-emerald-500 font-bold">•</span> {s}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {nutritionAnalysisResult.observacao && (
+                              <div className="mb-3">
+                                <p className="text-[10px] font-bold text-amber-500 uppercase mb-1">Observação</p>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                                  {nutritionAnalysisResult.observacao}
+                                </p>
+                              </div>
+                            )}
+                            <button
+                              onClick={analyzeTodayNutrition}
+                              className="w-full py-2 rounded-xl border border-slate-300 dark:border-slate-600 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800"
+                            >
+                              Analisar Novamente
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    <p className="text-[10px] text-slate-400 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                      Orientação geral de nutrição. Não substitui acompanhamento de nutricionista ou médico.
+                    </p>
                   </div>
                 </div>
               )}
